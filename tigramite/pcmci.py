@@ -193,9 +193,6 @@ class PCMCIParallel(PCMCIbase):
         parents : list
             List of form [(0, -1), (3, -2), ...] containing sorted parents.
         """
-        if self.verbosity > 1:
-            print("\n    Sorting parents in decreasing order with "
-                  "\n    weight(i-tau->j) = min_{iterations} |val_{ij}(tau)| ")
         # Get the absolute value for all the test statistics
         abs_values = {k: np.abs(parents_vals[k]) for k in list(parents_vals)}
         return sorted(abs_values, key=abs_values.get, reverse=True)
@@ -640,8 +637,8 @@ class PCMCIParallel(PCMCIbase):
         all_parents = dict()
         # Loop through the selected variables
         import joblib
-        results = joblib.Parallel(n_jobs=self.n_parallel, verbose=self.verbosity)([joblib.delayed(self._run_pc_stable_single)(
-            j, self.N, self.cond_ind_test, verbosity=self.verbosity,
+        results = joblib.Parallel(n_jobs=self.n_parallel, verbose=self.verbosity)([joblib.delayed(PCMCIParallel._run_pc_stable_single)(
+            j=j, N=self.N, cond_ind_test=self.cond_ind_test, verbosity=self.verbosity,
             link_assumptions_j=_int_link_assumptions[j], 
             tau_min=tau_min, tau_max=tau_max, 
             save_iterations=save_iterations, 
@@ -993,9 +990,9 @@ class PCMCIParallel(PCMCIbase):
 
         # Set the maximum condition dimension for Y and X
         max_conds_py = self._set_max_condition_dim(max_conds_py,
-                                                   tau_min, tau_max)
+                                                   tau_min, tau_max, self.N)
         max_conds_px = self._set_max_condition_dim(max_conds_px,
-                                                   tau_min, tau_max)
+                                                   tau_min, tau_max, self.N)
         # Get the parents that will be checked
         _int_parents = self._get_int_parents(parents)
         # Initialize the return values
@@ -1009,19 +1006,20 @@ class PCMCIParallel(PCMCIbase):
         def check_link_assumption(j, i, tau, _int_link_assumptions=_int_link_assumptions):
             return ((i, -abs(tau)) in _int_link_assumptions[j] and _int_link_assumptions[j][(i, -abs(tau))] in ['-->', 'o-o'])
 
+        def f_parallel(i, j, Z, tau, ):
+           if not check_link_assumption(j, i, tau):
+               return (i, j, tau, self.cond_ind_test.run_test([(i, tau)], [(j, 0)], Z=Z, tau_max=tau_max, alpha_or_thres=alpha_level)[:2])
+           else:
+               return (i, j, tau, (1., 0.))
+
         # Get the conditions as implied by the input arguments
         import joblib
         results = joblib.Parallel(n_jobs=self.n_parallel)(
-            [(i, j, tau, joblib.delay(self.cond_ind_test.run_test)(
-                [(i, tau)], [(j, 0)], Z=Z, tau_max=tau_max, alpha_or_thres=alpha_level)[:2]) if not check_link_assumption(j, i, tau) 
-                else (i, j, tau, (1., 0.)) for j, i, tau, Z in self._iter_indep_conds(_int_parents, _int_link_assumptions, max_conds_py, max_conds_px)])
-            # Set X and Y (for clarity of code)
-
+            [joblib.delayed(f_parallel)(i, j, Z, tau) for j, i, tau, Z in self._iter_indep_conds(_int_parents, _int_link_assumptions, max_conds_py, max_conds_px)])
 
         for i, j, tau, r in results:
             val_matrix[i, j, abs(tau)] = r[0]
             p_matrix[i, j, abs(tau)] = r[1]
-
 
         if val_only:
             results = {'val_matrix':val_matrix,
@@ -11652,8 +11650,7 @@ if __name__ == '__main__':
     #     print(link_assumptions[j])
     pcmci_parcorr = PCMCI(
         dataframe=dataframe, 
-        cond_ind_test=ci_test,
-        verbosity=1)
+        cond_ind_test=ci_test, verbosity=1)
     results = pcmci_parcorr.run_pcmciplus(tau_max=tau_max, 
                     pc_alpha=[0.001, 0.01, 0.05, 0.8], 
                     reset_lagged_links=False,
