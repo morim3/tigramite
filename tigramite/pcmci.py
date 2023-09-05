@@ -652,12 +652,12 @@ class PCMCIParallel(PCMCIbase):
 
         # Set the maximum condition dimension
         max_conds_dim = self._set_max_condition_dim(max_conds_dim,
-                                                    tau_min, tau_max)
+                                                    tau_min, tau_max, self.N)
 
         all_parents = dict()
         # Loop through the selected variables
         import joblib
-        results = joblib.Parallel(n_jobs=self.n_parallel)([joblib.delayed(self._run_pc_stable_single)(
+        results = joblib.Parallel(n_jobs=self.n_parallel, verbose=self.verbosity)([joblib.delayed(self._run_pc_stable_single)(
             j,
             link_assumptions_j=_int_link_assumptions[j], 
             tau_min=tau_min, tau_max=tau_max, 
