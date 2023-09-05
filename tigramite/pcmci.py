@@ -298,14 +298,15 @@ class PCMCIParallel(PCMCIbase):
                 "\nAlgorithm not yet converged, but max_conds_dim = %d"
                 " reached." % max_conds_dim)
 
-    def _run_pc_stable_single(self, j,
+    @staticmethod
+    def _run_pc_stable_single(j, N, cond_ind_test,
                               link_assumptions_j=None,
                               tau_min=1,
                               tau_max=1,
                               save_iterations=False,
                               pc_alpha=0.2,
                               max_conds_dim=None,
-                              max_combinations=1):
+                              max_combinations=1, verbosity=1):
         """Lagged PC algorithm for estimating lagged parents of single variable.
 
         Parameters
@@ -384,11 +385,10 @@ class PCMCIParallel(PCMCIbase):
         tau_min = max(1, tau_min)
 
         # Loop over all possible condition dimensions
-        max_conds_dim = self._set_max_condition_dim(max_conds_dim,
-                                                    tau_min, tau_max, self.N)
+        max_conds_dim = PCMCIParallel._set_max_condition_dim(max_conds_dim,
+                                                    tau_min, tau_max, N)
         # Iteration through increasing number of conditions, i.e. from 
         # [0, max_conds_dim] inclusive
-        converged = False
         for conds_dim in range(max_conds_dim + 1):
             # (Re)initialize the list of non-significant links
             nonsig_parents = list()
@@ -397,18 +397,15 @@ class PCMCIParallel(PCMCIbase):
                 converged = True
                 break
             # Print information about
-            if self.verbosity > 1:
+            if verbosity > 1:
                 print("\nTesting condition sets of dimension %d:" % conds_dim)
 
             # Iterate through all possible pairs (that have not converged yet)
             for index_parent, parent in enumerate(parents):
-                # Print info about this link
-                if self.verbosity > 1:
-                    self._print_link_info(j, index_parent, parent, len(parents))
                 # Iterate through all possible combinations
                 nonsig = False
                 for comb_index, Z in \
-                        enumerate(self._iter_conditions(parent, conds_dim,
+                        enumerate(PCMCIParallel._iter_conditions(parent, conds_dim,
                                                         parents)):
                     # Break if we try too many combinations
                     if comb_index >= max_combinations:
@@ -419,15 +416,12 @@ class PCMCIParallel(PCMCIbase):
                         pval = 0.
                         dependent = True
                     else:
-                        val, pval, dependent = self.cond_ind_test.run_test(X=[parent],
+                        val, pval, dependent = cond_ind_test.run_test(X=[parent],
                                                     Y=[(j, 0)],
                                                     Z=Z,
                                                     tau_max=tau_max,
                                                     alpha_or_thres=pc_alpha,
                                                     )
-                    # Print some information if needed
-                    if self.verbosity > 1:
-                        self._print_cond_info(Z, comb_index, pval, val)
                     # Keep track of maximum p-value and minimum estimated value
                     # for each pair (across any condition)
                     parents_values[parent] = \
@@ -450,25 +444,14 @@ class PCMCIParallel(PCMCIbase):
                         nonsig = True
                         break
 
-                # Print the results if needed
-                if self.verbosity > 1:
-                    self._print_a_pc_result(nonsig,
-                                            conds_dim, max_combinations)
 
             # Remove non-significant links
             for _, parent in nonsig_parents:
                 del parents_values[parent]
             # Return the parents list sorted by the test metric so that the
             # updated parents list is given to the next cond_dim loop
-            parents = self._sort_parents(parents_values)
-            # Print information about the change in possible parents
-            if self.verbosity > 1:
-                print("\nUpdating parents:")
-                self._print_parents_single(j, parents, parents_values, pval_max)
+            parents = PCMCIParallel._sort_parents(parents_values)
 
-        # Print information about if convergence was reached
-        if self.verbosity > 1:
-            self._print_converged_pc_single(converged, j, max_conds_dim)
         # Return the results
         return {'parents': parents,
                 'val_min': val_min,
@@ -658,7 +641,7 @@ class PCMCIParallel(PCMCIbase):
         # Loop through the selected variables
         import joblib
         results = joblib.Parallel(n_jobs=self.n_parallel, verbose=self.verbosity)([joblib.delayed(self._run_pc_stable_single)(
-            j,
+            j, self.N, self.cond_ind_test, verbosity=self.verbosity,
             link_assumptions_j=_int_link_assumptions[j], 
             tau_min=tau_min, tau_max=tau_max, 
             save_iterations=save_iterations, 
